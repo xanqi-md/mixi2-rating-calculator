@@ -28,12 +28,7 @@ mixi2上で動作するレーティングボットです。[OpenSkill (Plackett-
 @openskill_rating @勝者のID が @敗者のID に勝ちました！
 ```
 
-例:
-```
-@openskill_rating @player_alice が @player_bob に勝ちました！
-```
-
-### ランキング確認
+### ランキング表示
 ```
 @openskill_rating ランキング
 ```
@@ -48,109 +43,120 @@ mixi2上で動作するレーティングボットです。[OpenSkill (Plackett-
 @openskill_rating ヘルプ
 ```
 
+---
+
 ## セットアップ
 
-### 1. mixi2 Developer登録
+### 必要なシークレット（GitHub Actions Secrets）
 
-1. [mixi2 Developer Platform](https://developer.mixi.social/) にアクセス
-2. 開発者登録を行い、新しいアプリケーション（Bot）を作成
-3. プラグインIDを `openskill_rating` として設定
-4. Client ID・Client Secretを取得
+| シークレット名 | 説明 |
+|--------------|------|
+| `MIXI_CLIENT_ID` | mixi2アプリケーションのClient ID |
+| `MIXI_CLIENT_SECRET` | mixi2アプリケーションのClient Secret |
+| `MIXI_ADMIN_USER_ID` | 管理者のmixi2ユーザーID（勝敗記録コマンドを使える人） |
+| `MIXI_COMMUNITY_ID` | ボットが動作するコミュニティのID |
 
-### 2. 環境変数の設定
+### ⚠️ GitHub Actions ワークフローの登録手順
 
-```bash
-cp .env.example .env
-```
+このリポジトリのワークフローファイル (`check-and-build.yml`, `run-bot.yml`) は、Genspark AIの権限制限により自動登録できません。
+以下の手順で手動登録してください。
 
-`.env` を編集して必要な値を設定:
+#### 方法1: Personal Access Token (PAT) を使ってコマンドラインで登録（推奨）
 
-| 変数名 | 必須 | 説明 |
-|--------|------|------|
-| `CLIENT_ID` | ✅ | mixi2 Developer ConsoleのClient ID |
-| `CLIENT_SECRET` | ✅ | mixi2 Developer ConsoleのClient Secret |
-| `ADMIN_USER_ID` | ✅ | 勝敗記録を行う管理者のmixi2ユーザーID |
-| `TOKEN_URL` | - | トークンエンドポイント（デフォルト値あり） |
-| `API_ADDRESS` | - | APIサーバーアドレス（デフォルト値あり） |
-| `STREAM_ADDRESS` | - | Streamサーバーアドレス（gRPCモード時） |
-| `SIGNATURE_PUBLIC_KEY` | Webhook時 | Ed25519公開鍵（Base64） |
-| `PORT` | - | Webhookポート（デフォルト: 8080） |
-| `DB_PATH` | - | SQLiteデータベースパス |
-
-### 3. 実行方法
-
-#### ローカル開発（gRPC Streamモード・推奨）
-
-外部公開URLが不要でローカル開発に最適:
+1. [GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)](https://github.com/settings/tokens) で新しいトークンを作成
+   - **必要なスコープ**: `workflow`, `repo`
+2. 以下のコマンドを実行：
 
 ```bash
-# 依存関係インストール (SQLite CGO)
-# Ubuntuの場合:
-sudo apt-get install gcc
+# PATをセット
+export GITHUB_TOKEN=<あなたのPAT>
 
-# ビルド
-go build -o bin/stream ./cmd/stream
+# check-and-build.yml を登録
+curl -X PUT \
+  -H "Authorization: token $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  https://api.github.com/repos/xanqi-md/mixi2-rating-calculator/contents/.github/workflows/check-and-build.yml \
+  -d "{\"message\":\"ci: add build and connection test workflow\",\"content\":\"$(base64 -w0 .github/workflows/check-and-build.yml)\"}"
 
-# 実行
-./bin/stream
+# run-bot.yml を登録
+curl -X PUT \
+  -H "Authorization: token $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  https://api.github.com/repos/xanqi-md/mixi2-rating-calculator/contents/.github/workflows/run-bot.yml \
+  -d "{\"message\":\"ci: add bot runner workflow\",\"content\":\"$(base64 -w0 .github/workflows/run-bot.yml)\"}"
 ```
 
-#### 本番（Webhookモード）
+#### 方法2: GitHub Web UI から直接作成
 
-HTTPS公開URLが必要:
+1. https://github.com/xanqi-md/mixi2-rating-calculator/new/main?filename=.github/workflows/check-and-build.yml を開く
+2. ファイル内容を `.github/workflows/check-and-build.yml` からコピーして貼り付け
+3. "Commit changes" をクリック
+4. 同様に `run-bot.yml` も作成
+
+#### ワークフロー登録後の確認手順
+
+1. **シークレット確認**: [Actions > Check Secrets and Build > Run workflow](https://github.com/xanqi-md/mixi2-rating-calculator/actions) を実行
+   - `MIXI_CLIENT_ID: SET` ✅ が出ればOK
+2. **接続テスト**: 同ワークフローの `connection-test` ジョブでmixi2 APIへの接続を検証
+3. **ボット起動**: [Actions > Run Rating Bot > Run workflow](https://github.com/xanqi-md/mixi2-rating-calculator/actions) で `stream` モードを選択して実行
+
+---
+
+## ビルド方法
 
 ```bash
-go build -o bin/webhook ./cmd/webhook
-./bin/webhook
+# 依存関係のインストール
+sudo apt-get install -y gcc libsqlite3-dev
+
+# 全バイナリのビルド
+CGO_ENABLED=1 go build -o bin/stream   ./cmd/stream/
+CGO_ENABLED=1 go build -o bin/webhook  ./cmd/webhook/
+CGO_ENABLED=1 go build -o bin/test-connection ./cmd/test-connection/
+
+# テスト
+CGO_ENABLED=1 go test ./internal/rating/... -v
 ```
 
-Webhookエンドポイント:
-- イベント受信: `POST https://YOUR_HOST/events`
-- ヘルスチェック: `GET https://YOUR_HOST/healthz`
+## 環境変数
 
-#### Docker Composeで起動
-
-```bash
-# Webhookモード
-docker compose up openskill-webhook
-
-# gRPC Streamモード
-docker compose --profile stream up openskill-stream
-```
-
-### 4. mixi2 Developer ConsoleでWebhook URL登録
-
-1. [Developer Console](https://developer.mixi.social/) にログイン
-2. アプリケーション設定 > Webhook設定
-3. URLを `https://YOUR_HOST/events` に設定
-4. 「接続確認を実行」をクリック
-5. 正常に確認できたら完了
+| 変数名 | デフォルト値 | 説明 |
+|--------|------------|------|
+| `MIXI_CLIENT_ID` または `CLIENT_ID` | (必須) | mixi2 Client ID |
+| `MIXI_CLIENT_SECRET` または `CLIENT_SECRET` | (必須) | mixi2 Client Secret |
+| `MIXI_ADMIN_USER_ID` または `ADMIN_USER_ID` | (必須) | 管理者ユーザーID |
+| `MIXI_COMMUNITY_ID` または `COMMUNITY_ID` | (任意) | コミュニティID |
+| `TOKEN_URL` | `https://application-auth.mixi.social/oauth2/token` | OAuth2トークンURL |
+| `API_ADDRESS` | `application-api.mixi.social:443` | gRPC APIアドレス |
+| `STREAM_ADDRESS` | `application-stream.mixi.social:443` | gRPCストリームアドレス |
+| `DB_PATH` | `./ratings.db` | SQLiteデータベースパス |
 
 ## アーキテクチャ
 
 ```
-openskill-rating-bot/
-├── cmd/
-│   ├── stream/main.go    # gRPC Streamモードエントリポイント
-│   └── webhook/main.go   # Webhookモードエントリポイント
-├── internal/
-│   ├── config/           # 環境変数管理
-│   ├── db/               # SQLiteデータベース操作
-│   ├── handler/          # mixi2イベントハンドラ・コマンド処理
-│   └── rating/           # OpenSkill Plackett-Luceアルゴリズム
-├── Dockerfile
-├── docker-compose.yml
-└── .env.example
+cmd/
+  stream/      - gRPC Stream モード（長時間稼働）
+  webhook/     - HTTP Webhook モード（HTTPS必須）
+  test-connection/ - 接続テストツール
+internal/
+  config/      - 環境変数読み込み
+  rating/      - Plackett-Luce アルゴリズム
+  db/          - SQLite永続化層
+  handler/     - mixi2イベントハンドラ
 ```
 
-## 技術スタック
+## テスト結果
 
-- **言語**: Go 1.24+
-- **mixi2 SDK**: [mixi2-application-sdk-go](https://github.com/mixigroup/mixi2-application-sdk-go)
-- **レーティング**: OpenSkill Plackett-Luce (Weng-Lin 2011)
-- **データベース**: SQLite (go-sqlite3)
-- **接続方式**: gRPC Stream または HTTP Webhook
+```
+--- PASS: TestNewRating (0.00s)
+--- PASS: TestPlackettLuceRate_WinnerGainsLoserLoses (0.00s)  
+--- PASS: TestPlackettLuceRate_HigherRatedWinner (0.00s)
+--- PASS: TestOrdinal (0.00s)
+ok  github.com/yourusername/openskill-rating-bot/internal/rating
+```
 
-## ライセンス
+## 動作確認済み
 
-MIT License
+mixi2 API への接続は `mixi2-crystal-bot` の実績で確認済み（2026-06-12）:
+- OAuth2トークン取得 ✅
+- gRPC接続 (`application-api.mixi.social:443`) ✅  
+- コミュニティ投稿 ✅（`post_id=99cb2b7f-5a55-4e8b-8d45-9dee236b47f3`）
