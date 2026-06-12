@@ -6,3 +6,5 @@
 /dist/
 .DS_Store
 ratings.db
+test-connection
+/bin/

@@ -35,27 +35,29 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		ClientID:          getEnv("CLIENT_ID", ""),
-		ClientSecret:      getEnv("CLIENT_SECRET", ""),
-		TokenURL:          getEnv("TOKEN_URL", "https://auth.mixi.social/oauth/token"),
-		APIAddress:        getEnv("API_ADDRESS", "api.mixi.social:443"),
-		StreamAddress:     getEnv("STREAM_ADDRESS", "stream.mixi.social:443"),
-		SignaturePublicKey: getEnv("SIGNATURE_PUBLIC_KEY", ""),
+		// Support both CLIENT_ID and MIXI_CLIENT_ID naming conventions
+		ClientID:     getEnvMulti([]string{"CLIENT_ID", "MIXI_CLIENT_ID"}, ""),
+		ClientSecret: getEnvMulti([]string{"CLIENT_SECRET", "MIXI_CLIENT_SECRET"}, ""),
+		// Use the confirmed mixi2 production endpoint as default
+		TokenURL:          getEnvMulti([]string{"TOKEN_URL", "MIXI_TOKEN_URL"}, "https://application-auth.mixi.social/oauth2/token"),
+		APIAddress:        getEnvMulti([]string{"API_ADDRESS", "MIXI_API_ADDRESS"}, "application-api.mixi.social:443"),
+		StreamAddress:     getEnvMulti([]string{"STREAM_ADDRESS", "MIXI_STREAM_ADDRESS"}, "application-stream.mixi.social:443"),
+		SignaturePublicKey: getEnvMulti([]string{"SIGNATURE_PUBLIC_KEY", "MIXI_SIGNATURE_PUBLIC_KEY"}, ""),
 		Port:              getEnv("PORT", "8080"),
-		AdminUserID:       getEnv("ADMIN_USER_ID", ""),
+		AdminUserID:       getEnvMulti([]string{"ADMIN_USER_ID", "MIXI_ADMIN_USER_ID"}, ""),
 		DBPath:            getEnv("DB_PATH", "./ratings.db"),
 	}
 
 	// Validate required fields
 	var missing []string
 	if cfg.ClientID == "" {
-		missing = append(missing, "CLIENT_ID")
+		missing = append(missing, "CLIENT_ID (or MIXI_CLIENT_ID)")
 	}
 	if cfg.ClientSecret == "" {
-		missing = append(missing, "CLIENT_SECRET")
+		missing = append(missing, "CLIENT_SECRET (or MIXI_CLIENT_SECRET)")
 	}
 	if cfg.AdminUserID == "" {
-		missing = append(missing, "ADMIN_USER_ID")
+		missing = append(missing, "ADMIN_USER_ID (or MIXI_ADMIN_USER_ID)")
 	}
 
 	if len(missing) > 0 {
@@ -77,6 +79,16 @@ func (c *Config) ValidateWebhook() error {
 func getEnv(key, defaultVal string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
+	}
+	return defaultVal
+}
+
+// getEnvMulti tries multiple environment variable names in order, returning the first non-empty value.
+func getEnvMulti(keys []string, defaultVal string) string {
+	for _, key := range keys {
+		if val := os.Getenv(key); val != "" {
+			return val
+		}
 	}
 	return defaultVal
 }
