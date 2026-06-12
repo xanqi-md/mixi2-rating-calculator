@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Webhook mode (for production with HTTPS endpoint)
+  openskill-webhook:
+    build: .
+    container_name: openskill-rating-webhook
+    command: /app/webhook
+    ports:
+      - "8080:8080"
+    volumes:
+      - ratings_data:/data
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/data/ratings.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # gRPC Stream mode (for local development / no HTTPS needed)
+  openskill-stream:
+    build: .
+    container_name: openskill-rating-stream
+    command: /app/stream
+    volumes:
+      - ratings_data:/data
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/data/ratings.db
+    restart: unless-stopped
+    profiles:
+      - stream  # Only start with: docker compose --profile stream up
+
+volumes:
+  ratings_data:
+    driver: local

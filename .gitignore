@@ -1,0 +1,10 @@
+.env
+*.db
+*.db-shm
+*.db-wal
+/bin/
+/dist/
+.DS_Store
+ratings.db
+test-connection
+/bin/
