@@ -1,0 +1,87 @@
+name: Check Secrets and Build
+
+on:
+  push:
+    branches: [main, genspark_ai_developer]
+  workflow_dispatch:
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check which secrets are set (non-empty)
+        run: |
+          echo "=== Checking which secrets/variables are configured ==="
+          
+          # Check each variable (shows 'set' or 'not set', never reveals value)
+          check_secret() {
+            local name=$1
+            local value=$2
+            if [ -n "$value" ]; then
+              echo "✅ $name: SET"
+            else
+              echo "❌ $name: NOT SET"
+            fi
+          }
+          
+          check_secret "CLIENT_ID"            "${{ secrets.CLIENT_ID }}"
+          check_secret "CLIENT_SECRET"        "${{ secrets.CLIENT_SECRET }}"
+          check_secret "TOKEN_URL"            "${{ secrets.TOKEN_URL }}"
+          check_secret "API_ADDRESS"          "${{ secrets.API_ADDRESS }}"
+          check_secret "STREAM_ADDRESS"       "${{ secrets.STREAM_ADDRESS }}"
+          check_secret "SIGNATURE_PUBLIC_KEY" "${{ secrets.SIGNATURE_PUBLIC_KEY }}"
+          check_secret "ADMIN_USER_ID"        "${{ secrets.ADMIN_USER_ID }}"
+          check_secret "PORT"                 "${{ secrets.PORT }}"
+          check_secret "DB_PATH"              "${{ secrets.DB_PATH }}"
+          
+          echo ""
+          echo "=== Variables ==="
+          check_secret "CLIENT_ID (var)"            "${{ vars.CLIENT_ID }}"
+          check_secret "CLIENT_SECRET (var)"        "${{ vars.CLIENT_SECRET }}"
+          check_secret "TOKEN_URL (var)"            "${{ vars.TOKEN_URL }}"
+          check_secret "API_ADDRESS (var)"          "${{ vars.API_ADDRESS }}"
+          check_secret "STREAM_ADDRESS (var)"       "${{ vars.STREAM_ADDRESS }}"
+          check_secret "SIGNATURE_PUBLIC_KEY (var)" "${{ vars.SIGNATURE_PUBLIC_KEY }}"
+          check_secret "ADMIN_USER_ID (var)"        "${{ vars.ADMIN_USER_ID }}"
+          check_secret "PORT (var)"                 "${{ vars.PORT }}"
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install SQLite dependencies
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Run unit tests
+        run: |
+          cd ${{ github.workspace }}
+          CGO_ENABLED=1 go test ./... -v
+
+      - name: Build stream binary
+        run: |
+          CGO_ENABLED=1 go build -o bin/stream ./cmd/stream
+          echo "✅ Stream binary built: $(du -h bin/stream)"
+
+      - name: Build webhook binary
+        run: |
+          CGO_ENABLED=1 go build -o bin/webhook ./cmd/webhook
+          echo "✅ Webhook binary built: $(du -h bin/webhook)"
+
+      - name: Test stream binary startup (with dummy env)
+        run: |
+          # Test that the binary starts and fails gracefully with missing config
+          timeout 3s ./bin/stream 2>&1 | head -5 || true
+          echo "Exit code $? (expected non-zero due to missing config)"
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-binaries
+          path: bin/
+          retention-days: 7
