@@ -1,0 +1,72 @@
+name: Run Rating Bot (Stream Mode)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'stream'
+        type: choice
+        options:
+          - stream
+          - webhook
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+
+      - name: Install SQLite
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Unit tests
+        run: CGO_ENABLED=1 go test ./internal/rating/... -v
+
+      - name: Build connection test + bot
+        run: |
+          CGO_ENABLED=1 go build -o /tmp/test-connection ./cmd/test-connection/
+          CGO_ENABLED=1 go build -o /tmp/rating-bot ./cmd/${{ github.event.inputs.mode }}/
+          echo "✅ Binaries built"
+
+      - name: Pre-flight connection test
+        env:
+          MIXI_CLIENT_ID:     ${{ secrets.MIXI_CLIENT_ID }}
+          MIXI_CLIENT_SECRET: ${{ secrets.MIXI_CLIENT_SECRET }}
+          MIXI_ADMIN_USER_ID: ${{ secrets.MIXI_ADMIN_USER_ID }}
+          CLIENT_ID:          ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET:      ${{ secrets.CLIENT_SECRET }}
+          ADMIN_USER_ID:      ${{ secrets.ADMIN_USER_ID }}
+          TOKEN_URL:          https://application-auth.mixi.social/oauth2/token
+          API_ADDRESS:        application-api.mixi.social:443
+        run: |
+          /tmp/test-connection
+          echo "✅ Pre-flight check passed"
+
+      - name: Run bot (${{ github.event.inputs.mode }} mode)
+        env:
+          # MIXI_ prefixed
+          MIXI_CLIENT_ID:     ${{ secrets.MIXI_CLIENT_ID }}
+          MIXI_CLIENT_SECRET: ${{ secrets.MIXI_CLIENT_SECRET }}
+          MIXI_ADMIN_USER_ID: ${{ secrets.MIXI_ADMIN_USER_ID }}
+          MIXI_COMMUNITY_ID:  ${{ secrets.MIXI_COMMUNITY_ID }}
+          # Plain naming (already set in this repo)
+          CLIENT_ID:          ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET:      ${{ secrets.CLIENT_SECRET }}
+          ADMIN_USER_ID:      ${{ secrets.ADMIN_USER_ID }}
+          COMMUNITY_ID:       ${{ secrets.COMMUNITY_ID }}
+          TOKEN_URL:          https://application-auth.mixi.social/oauth2/token
+          API_ADDRESS:        application-api.mixi.social:443
+          STREAM_ADDRESS:     application-stream.mixi.social:443
+          PORT:               "8080"
+          DB_PATH:            /home/runner/work/ratings.db
+        run: |
+          echo "🚀 Starting OpenSkill Rating Bot (${{ github.event.inputs.mode }} mode)"
+          /tmp/rating-bot
