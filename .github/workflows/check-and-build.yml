@@ -1,0 +1,91 @@
+name: Check Secrets and Build
+
+on:
+  push:
+    branches: [main, genspark_ai_developer]
+  workflow_dispatch:
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check which secrets are set
+        run: |
+          echo "=== Checking secrets/variables ==="
+
+          check_secret() {
+            local name=$1
+            local value=$2
+            if [ -n "$value" ]; then
+              echo "✅ $name: SET"
+            else
+              echo "❌ $name: NOT SET"
+            fi
+          }
+
+          echo "--- MIXI_ prefixed (primary) ---"
+          check_secret "MIXI_CLIENT_ID"     "${{ secrets.MIXI_CLIENT_ID }}"
+          check_secret "MIXI_CLIENT_SECRET" "${{ secrets.MIXI_CLIENT_SECRET }}"
+          check_secret "MIXI_ADMIN_USER_ID" "${{ secrets.MIXI_ADMIN_USER_ID }}"
+          check_secret "MIXI_COMMUNITY_ID"  "${{ secrets.MIXI_COMMUNITY_ID }}"
+
+          echo ""
+          echo "--- Plain naming (fallback) ---"
+          check_secret "CLIENT_ID"          "${{ secrets.CLIENT_ID }}"
+          check_secret "CLIENT_SECRET"      "${{ secrets.CLIENT_SECRET }}"
+          check_secret "ADMIN_USER_ID"      "${{ secrets.ADMIN_USER_ID }}"
+          check_secret "COMMUNITY_ID"       "${{ secrets.COMMUNITY_ID }}"
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+
+      - name: Install SQLite
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Unit tests
+        run: CGO_ENABLED=1 go test ./internal/rating/... -v
+
+      - name: Build all binaries
+        run: |
+          CGO_ENABLED=1 go build -o /tmp/bot-stream       ./cmd/stream/
+          CGO_ENABLED=1 go build -o /tmp/bot-webhook      ./cmd/webhook/
+          CGO_ENABLED=1 go build -o /tmp/test-connection  ./cmd/test-connection/
+          ls -lh /tmp/bot-stream /tmp/bot-webhook /tmp/test-connection
+
+  connection-test:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+
+      - name: Install SQLite
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Build connection test
+        run: CGO_ENABLED=1 go build -o /tmp/test-connection ./cmd/test-connection/
+
+      - name: Run 3-step connection test
+        env:
+          MIXI_CLIENT_ID:     ${{ secrets.MIXI_CLIENT_ID }}
+          MIXI_CLIENT_SECRET: ${{ secrets.MIXI_CLIENT_SECRET }}
+          MIXI_ADMIN_USER_ID: ${{ secrets.MIXI_ADMIN_USER_ID }}
+          MIXI_COMMUNITY_ID:  ${{ secrets.MIXI_COMMUNITY_ID }}
+          TOKEN_URL:          https://application-auth.mixi.social/oauth2/token
+          API_ADDRESS:        application-api.mixi.social:443
+          STREAM_ADDRESS:     application-stream.mixi.social:443
+        run: |
+          if [ -z "$MIXI_CLIENT_ID" ]; then echo "❌ MIXI_CLIENT_ID not set"; exit 1; fi
+          if [ -z "$MIXI_CLIENT_SECRET" ]; then echo "❌ MIXI_CLIENT_SECRET not set"; exit 1; fi
+          echo "✅ Secrets present — running connection test..."
+          /tmp/test-connection
+          echo "🎉 CONNECTION TEST PASSED — Bot is ready!"
